@@ -467,7 +467,7 @@ function parseTimecode(timecode) {
 	if (typeof timecode != "string") {
 		return timecode;
 	} else if (timecode.includes(':')) {
-		var a = timecode.split(':'));
+		var a = timecode.split(':');
 		return parseInt(a[0]) * 3600 + parseInt(a[1]) * 60 + parseInt(a[2]);
 	} else {
 		return parseInt(timecode);
@@ -645,3 +645,4 @@ window.addEventListener('load', () => {
 });
 
 debugLog('script.js', '=== PMMS-DUI DEBUG SCRIPT LOADED ===');
+
