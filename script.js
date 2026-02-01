@@ -5,6 +5,35 @@ var isRDR = true;
 var audioVisualizations = {};
 var currentServerEndpoint = '127.0.0.1:30120';
 
+// ============================================
+// DEBUG LOGGING - Track YouTube URL Flow
+// ============================================
+function debugLog(location, message, data) {
+	const timestamp = new Date().toISOString();
+	const logPrefix = `[PMMS-DUI DEBUG ${timestamp}] [${location}]`;
+	
+	if (data !== undefined) {
+		console.log(`${logPrefix} ${message}:`, data);
+	} else {
+		console.log(`${logPrefix} ${message}`);
+	}
+}
+
+function extractYouTubeVideoId(url) {
+	if (!url) return null;
+	const patterns = [
+		/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+		/youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/
+	];
+	
+	for (const pattern of patterns) {
+		const match = url.match(pattern);
+		if (match) return match[1];
+	}
+	return null;
+}
+// ============================================
+
 function sendMessage(name, params) {
 	return fetch(`https://${resourceName}/${name}`, {
 		method: 'POST',
@@ -193,18 +222,54 @@ function hideLoadingIcon() {
 }
 
 function resolveUrl(url) {
-	if (url.startsWith('http://') || url.startsWith('https://')) {
-		return url;
-	} else {
-		return 'http://' + currentServerEndpoint + '/pmms/media/' + url;
+	debugLog('resolveUrl', 'Input URL', url);
+	const videoId = extractYouTubeVideoId(url);
+	if (videoId) {
+		debugLog('resolveUrl', 'Detected YouTube Video ID', videoId);
 	}
+	
+	let resolved;
+	if (url.startsWith('http://') || url.startsWith('https://')) {
+		resolved = url;
+	} else {
+		resolved = 'http://' + currentServerEndpoint + '/pmms/media/' + url;
+	}
+	
+	debugLog('resolveUrl', 'Resolved URL', resolved);
+	const resolvedVideoId = extractYouTubeVideoId(resolved);
+	if (resolvedVideoId) {
+		debugLog('resolveUrl', 'Resolved URL Video ID', resolvedVideoId);
+	}
+	
+	return resolved;
 }
 
 function initPlayer(id, handle, options) {
+	debugLog('initPlayer', '=== PLAYER INITIALIZATION START ===');
+	debugLog('initPlayer', 'Player ID', id);
+	debugLog('initPlayer', 'Handle', handle);
+	debugLog('initPlayer', 'Options URL (original)', options.url);
+	
+	const inputVideoId = extractYouTubeVideoId(options.url);
+	if (inputVideoId) {
+		debugLog('initPlayer', 'INPUT YouTube Video ID', inputVideoId);
+	}
+	
 	var player = document.createElement('video');
 	player.id = id;
-	player.src = resolveUrl(options.url);
+	
+	const resolvedUrl = resolveUrl(options.url);
+	debugLog('initPlayer', 'Setting player.src to', resolvedUrl);
+	player.src = resolvedUrl;
+	
+	debugLog('initPlayer', 'Player.src AFTER assignment', player.src);
+	const afterSetVideoId = extractYouTubeVideoId(player.src);
+	if (afterSetVideoId) {
+		debugLog('initPlayer', 'Video ID AFTER player.src assignment', afterSetVideoId);
+	}
+	
 	document.body.appendChild(player);
+	debugLog('initPlayer', 'Player appended to body');
 
 	if (options.attenuation == null) {
 		options.attenuation = {sameRoom: 0, diffRoom: 0};
@@ -212,6 +277,11 @@ function initPlayer(id, handle, options) {
 
 	new MediaElement(id, {
 		error: function(media) {
+			debugLog('MediaElement.error', 'MediaElement initialization error', {
+				url: options.url,
+				message: media.error.message
+			});
+			
 			hideLoadingIcon();
 
 			sendMessage('initError', {
@@ -222,6 +292,31 @@ function initPlayer(id, handle, options) {
 			media.remove();
 		},
 		success: function(media, domNode) {
+			debugLog('MediaElement.success', '=== MediaElement SUCCESS CALLBACK ===');
+			debugLog('MediaElement.success', 'Media element created');
+			debugLog('MediaElement.success', 'media.src', media.src);
+			debugLog('MediaElement.success', 'media.currentSrc', media.currentSrc);
+			
+			const successVideoId = extractYouTubeVideoId(media.src || media.currentSrc);
+			if (successVideoId) {
+				debugLog('MediaElement.success', 'Video ID in MediaElement success', successVideoId);
+			}
+			
+			// Check for YouTube API
+			if (media.youTubeApi) {
+				debugLog('MediaElement.success', 'YouTube API detected');
+				try {
+					const ytUrl = media.youTubeApi.getVideoUrl();
+					debugLog('MediaElement.success', 'YouTube API URL', ytUrl);
+					const ytVideoId = extractYouTubeVideoId(ytUrl);
+					if (ytVideoId) {
+						debugLog('MediaElement.success', 'YouTube API Video ID', ytVideoId);
+					}
+				} catch (e) {
+					debugLog('MediaElement.success', 'Could not get YouTube API URL', e.message);
+				}
+			}
+			
 			media.className = 'player';
 
 			media.pmms = {};
@@ -232,6 +327,12 @@ function initPlayer(id, handle, options) {
 			media.volume = 0;
 
 			media.addEventListener('error', event => {
+				debugLog('media.error', 'Media element error event', {
+					error: media.error,
+					code: media.error ? media.error.code : null,
+					message: media.error ? media.error.message : null
+				});
+				
 				hideLoadingIcon();
 
 				sendMessage('playError', {
@@ -249,6 +350,15 @@ function initPlayer(id, handle, options) {
 					return;
 				}
 
+				debugLog('media.canplay', '=== MEDIA CAN PLAY ===');
+				debugLog('media.canplay', 'media.src', media.src);
+				debugLog('media.canplay', 'media.currentSrc', media.currentSrc);
+				
+				const canplayVideoId = extractYouTubeVideoId(media.src || media.currentSrc);
+				if (canplayVideoId) {
+					debugLog('media.canplay', 'Video ID when media can play', canplayVideoId);
+				}
+
 				hideLoadingIcon();
 
 				var duration;
@@ -262,7 +372,18 @@ function initPlayer(id, handle, options) {
 				}
 
 				if (media.youTubeApi) {
-					options.title = media.youTubeApi.getVideoData().title;
+					debugLog('media.canplay', 'YouTube API present - getting video data');
+					try {
+						const videoData = media.youTubeApi.getVideoData();
+						debugLog('media.canplay', 'YouTube Video Data', videoData);
+						options.title = videoData.title;
+						
+						if (videoData.video_id) {
+							debugLog('media.canplay', 'YouTube API video_id', videoData.video_id);
+						}
+					} catch (e) {
+						debugLog('media.canplay', 'Error getting YouTube video data', e.message);
+					}
 
 					media.videoTracks = {length: 1};
 				} else if (media.hlsPlayer) {
@@ -281,6 +402,11 @@ function initPlayer(id, handle, options) {
 				options.video = true;
 				options.videoSize = 0;
 
+				debugLog('media.canplay', 'Sending init message to PMMS', {
+					handle: handle,
+					options: options
+				});
+
 				sendMessage('init', {
 					handle: handle,
 					options: options
@@ -292,6 +418,15 @@ function initPlayer(id, handle, options) {
 			});
 
 			media.addEventListener('playing', () => {
+				debugLog('media.playing', '=== MEDIA PLAYING ===');
+				debugLog('media.playing', 'media.src', media.src);
+				debugLog('media.playing', 'media.currentSrc', media.currentSrc);
+				
+				const playingVideoId = extractYouTubeVideoId(media.src || media.currentSrc);
+				if (playingVideoId) {
+					debugLog('media.playing', 'Video ID CURRENTLY PLAYING', playingVideoId);
+				}
+				
 				if (options.filter && !media.pmms.filterAdded) {
 					if (isRDR) {
 						applyPhonographFilter(media);
@@ -332,7 +467,7 @@ function parseTimecode(timecode) {
 	if (typeof timecode != "string") {
 		return timecode;
 	} else if (timecode.includes(':')) {
-		var a = timecode.split(':');
+		var a = timecode.split(':'));
 		return parseInt(a[0]) * 3600 + parseInt(a[1]) * 60 + parseInt(a[2]);
 	} else {
 		return parseInt(timecode);
@@ -340,8 +475,17 @@ function parseTimecode(timecode) {
 }
 
 function init(data) {
+	debugLog('init', '=== INIT MESSAGE RECEIVED FROM PMMS ===');
+	debugLog('init', 'Data', data);
+	
 	if (data.url == '') {
+		debugLog('init', 'Empty URL - aborting');
 		return;
+	}
+	
+	const initVideoId = extractYouTubeVideoId(data.url);
+	if (initVideoId) {
+		debugLog('init', 'YouTube Video ID in init data', initVideoId);
 	}
 
 	showLoadingIcon();
@@ -356,10 +500,12 @@ function init(data) {
 }
 
 function play(handle) {
+	debugLog('play', 'Play requested for handle', handle);
 	var player = getPlayer(handle);
 }
 
 function stop(handle) {
+	debugLog('stop', 'Stop requested for handle', handle);
 	var player = getPlayer(handle);
 
 	if (player) {
@@ -454,6 +600,7 @@ function setResourceNameFromUrl() {
 	var url = new URL(window.location);
 	var params = new URLSearchParams(url.search);
 	resourceName = params.get('resourceName') || resourceName;
+	debugLog('setResourceNameFromUrl', 'Resource name', resourceName);
 }
 
 window.addEventListener('message', event => {
@@ -477,9 +624,14 @@ window.addEventListener('message', event => {
 });
 
 window.addEventListener('load', () => {
+	debugLog('window.load', '=== DUI PAGE LOADED ===');
+	debugLog('window.load', 'Window location', window.location.href);
+	
 	setResourceNameFromUrl();
 
 	sendMessage('duiStartup', {}).then(resp => resp.json()).then(resp => {
+		debugLog('window.load', 'duiStartup response', resp);
+		
 		if (resp.isRDR != undefined) {
 			isRDR = resp.isRDR;
 		}
@@ -491,3 +643,5 @@ window.addEventListener('load', () => {
 		}
 	});
 });
+
+debugLog('script.js', '=== PMMS-DUI DEBUG SCRIPT LOADED ===');
